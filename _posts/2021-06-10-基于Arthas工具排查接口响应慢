@@ -1,0 +1,49 @@
+### 资料
+
+- 官方文档：[https://arthas.aliyun.com/](https://arthas.aliyun.com/)
+- 重要命令
+- trace：可以查看某个方法内部每一行的执行耗时
+- tt：可以记录某个方法所有的执行记录（含入参，出参），并支持回放
+- IDEA插件： arthas，可以生成 arthas 表达式，简化使用
+- ![image.png](https://cdn.nlark.com/yuque/0/2021/png/2637561/1623289612869-8f11b934-5383-4276-9427-bc81163baa18.png#align=left&display=inline&height=700&originHeight=1400&originWidth=2116&size=2002834&status=done&style=none&width=1058)
+
+### 使用案例
+
+#### QCI3 菜单加载慢的跟进
+
+1. 使用trace命令从Controller入口跟进，一层层发现耗时长的方法，最终定位到问题在 getUserAllWorkspacePermissions 中的一处lambda用法上： java.util.List:forEach() 
+
+trace com.aliyun.quicka.userinsight.service.menu.impl.MenuServiceImpl getMenuUserKeyV2 -v -n 5 --skipJDKMethod false '1==1' 
+trace com.aliyun.quicka.userinsight.service.menu.impl.MenuServiceImpl getUserAllWorkspacePermissions -v -n 5 --skipJDKMethod false '1==1' 
+
+```java
+trace com.aliyun.quicka.userinsight.service.menu.impl.MenuServiceImpl getMenuUserKeyV2 -v -n 5 --skipJDKMethod false '1==1' 
+trace com.aliyun.quicka.userinsight.service.menu.impl.MenuServiceImpl getUserAllWorkspacePermissions -v -n 5 --skipJDKMethod false '1==1' 
+
+....
+```
+
+![image.png](https://cdn.nlark.com/yuque/0/2021/png/2637561/1623289661523-fa7f4a4a-bc4d-4a8b-929a-b816c4195a6d.png#align=left&display=inline&height=921&originHeight=1842&originWidth=2334&size=3405433&status=done&style=none&width=1167)
+
+2. 使用tt命令跟Lambda内调用的方法，发现每个空间查一次耗时要2600ms，使用的测试账户有11个空间，共要花29s才能加载出菜单
+
+```java
+tt -t com.aliyun.quicka.userinsight.service.menu.impl.MenuServiceImpl getUserAllWorkspacePermissions
+```
+
+![image.png](https://cdn.nlark.com/yuque/0/2021/png/2637561/1623289683223-3ccee859-58b6-4980-8fb5-f9bb13749395.png#align=left&display=inline&height=117&originHeight=234&originWidth=3204&size=316088&status=done&style=none&width=1602)
+
+3. 最终定位到问题原因是N+1问题，为了加载菜单需要获取用户所有空间的权限，每个空间都去DB中查1次，十几个空间消耗了接近30s
+4. 其他：使用 tt -i ，对照着 上一步中的INDEX 查看调用详情，展示出复杂数据结构的完整信息；并且能通过-p命令来重放命令（可惜发现的太晚，白白花了好长时间等缓存过期来复现bug）
+
+```java
+tt -i 1025
+tt -i 1000 -p
+```
+
+![image.png](https://cdn.nlark.com/yuque/0/2021/png/2637561/1623289713738-8ac4db74-174e-4b2f-be13-fdeee9492fe8.png#align=left&display=inline&height=901&originHeight=1802&originWidth=3202&size=4073974&status=done&style=none&width=1601)
+
+### 注意事项
+
+- trace 命令每次只能跟进一层的时间消耗，官网提到可以动态添加新的trace点，但也需要触发新的网络请求
+- 谨慎执行 heapdump 命令，耗时极久
